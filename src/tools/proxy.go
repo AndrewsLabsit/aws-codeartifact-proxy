@@ -11,14 +11,17 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 var originalUrlResolver = make(map[string]*url.URL)
+var mutex = &sync.Mutex{}
 
 // ProxyRequestHandler intercepts requests to CodeArtifact and add the Authorization header + correct Host header
 func ProxyRequestHandler(p *httputil.ReverseProxy) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Store the original host header for each request
+		mutex.Lock()
 		originalUrlResolver[r.RemoteAddr] = r.URL
 		originalUrlResolver[r.RemoteAddr].Host = r.Host
 		originalUrlResolver[r.RemoteAddr].Scheme = r.URL.Scheme
@@ -28,7 +31,7 @@ func ProxyRequestHandler(p *httputil.ReverseProxy) func(http.ResponseWriter, *ht
 		} else {
 			originalUrlResolver[r.RemoteAddr].Scheme = "http"
 		}
-
+		mutex.Unlock()
 		// Override the Host header with the CodeArtifact Host
 		u, _ := url.Parse(CodeArtifactAuthInfo.Url)
 		r.Host = u.Host
@@ -51,8 +54,10 @@ func ProxyResponseHandler() func(*http.Response) error {
 
 		contentType := r.Header.Get("Content-Type")
 
+		mutex.Lock()
 		originalUrl := originalUrlResolver[r.Request.RemoteAddr]
 		delete(originalUrlResolver, r.Request.RemoteAddr)
+		mutex.Unlock()
 
 		u, _ := url.Parse(CodeArtifactAuthInfo.Url)
 		hostname := u.Host + ":443"
